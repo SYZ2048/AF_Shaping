@@ -3,11 +3,12 @@
 
 % 参数设置
 clc;clear;close all;
-% rng default;
-N = 25;          % 波形长度
+rng default;
+fs = 100e3;             % 采样频率 (Hz)
+N = 25;
 Nv = 50;         % 多普勒bin数量
 gamma = 4;       % PAR参数
-max_iter = 1e4; % 最大迭代次数
+max_iter = 1e3; % 最大迭代次数
 tol = 1e-6;      % 收敛容差
 %
 
@@ -191,18 +192,21 @@ function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p)
     hold on;
     % 检测p中的连通区域
     CC = bwconncomp(p);
-    stats = regionprops(CC, 'BoundingBox');
-    for i = 1:length(stats)
-        bb = stats(i).BoundingBox; % 格式 [x, y, width, height]，索引起点为1
-        % 将p矩阵坐标转换为plot的横纵坐标
-        % p的行是时延(r)，列是多普勒bin
-        % bb(1): 列起点，bb(2): 行起点
-        x_left = doppler_range(floor(bb(1)));
-        y_top = delay_range(floor(bb(2)));
-        w = bb(3) * (doppler_range(2) - doppler_range(1)); % 水平宽度
-        h = bb(4) * (delay_range(2) - delay_range(1));     % 垂直高度
-        rectangle('Position', [x_left, y_top, w, h], ...
-            'EdgeColor', 'r', 'LineWidth', 0.5);
+    for i = 1:CC.NumObjects
+        % 得到所有该区域的索引
+        inds = CC.PixelIdxList{i};
+        [r_idx, v_idx] = ind2sub(size(p), inds);
+        r_min = min(r_idx)-1; r_max = max(r_idx)-1; % -1转为实际时延
+        v_min = min(v_idx)-1; v_max = max(v_idx)-1; % -1转为实际doppler bin
+        
+        % 映射到坐标轴（中心居中, 所以-0.5/+0.5）
+        x_left = doppler_range(v_min+1) - 0.5/Nv;
+        y_bottom = delay_range(r_min+1) - 0.5;
+        w = (v_max - v_min + 1) / Nv;
+        h = (r_max - r_min + 1);
+        
+        rectangle('Position', [x_left, y_bottom, w, h], ...
+            'EdgeColor', 'r', 'LineWidth', 0.5, 'LineStyle', '-');
     end
     hold off;
     
