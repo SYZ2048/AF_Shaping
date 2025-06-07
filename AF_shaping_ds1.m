@@ -3,45 +3,50 @@
 
 % 参数设置
 clc;clear;close all;
-rng default;
+% rng default;
 tic;
 fs = 100e3;             % 采样频率 (Hz)
-pulse_duration = 0.1;   % 发射脉冲持续时间 (s)
-N = fs * pulse_duration;          % 波形长度
 %！！！！！！ 目前的极限是250 * 200 ！！！！！！
-N = 25 * 10;
-Nv = 1e2;         % 多普勒bin数量
-fs / Nv
+N = 100;
+Nv = 100;         % 多普勒bin数量
 
-% N = 25;
-% Nv = 50;         % 多普勒bin数量
+f_max = 500;           % 优化范围的最高频率
+doppler_bins = linspace(-f_max, f_max, Nv+1);
+vh_range = doppler_bins / fs; 
+target_freq = 60;  % 目标频率Hz
+[~, freq_bin_idx] = min(abs(doppler_bins - target_freq));  % 找最近的bin
+
 gamma = 4;       % PAR参数
-max_iter = 1e4; % 最大迭代次数
+max_iter = 1e3; % 最大迭代次数
 tol = 1e-6;      % 收敛容差
 %
 
-% 初始化随机波形
+% 初始化随机波形和目标函数值
 s = exp(1j * 2*pi * rand(N,1));
-% 初始化记录目标函数值
 obj_values = zeros(max_iter, 1);
 %
 
 % 设置干扰区域(p_k) (bin从0开始, MATLAB索引从1开始)
 interference_map = zeros(N, Nv);
-interference_map(N/2:N/2+2, (Nv/2+13):(Nv/2+13)) = 1;
+interference_map(1:N, freq_bin_idx) = 1;
 interference_map(20:N, Nv/2+1) = 1;    % 0 Hz
 %
-plot_ambiguity_function(s, N, Nv, interference_map);
+plot_ambiguity_function(s, N, Nv, interference_map, vh_range);
+
+% data = load("100_100_1e4.mat", "s");
+% s_generate = data.s;
+% plot_ambiguity_function(s_generate, N, Nv, interference_map, vh_range);
+% figure;plot(real(s_generate));
+
 
 % 预计算A_k矩阵，N*Nv*N*N, 25x50x{25x25 double}
 A = cell(N, Nv);
 fprintf('A 占用内存 %.2f MB\n', whos('A').bytes / (1024^2));
 for r = 0:N-1
     for h = 0:Nv-1
-        vh = -0.5 + h/Nv; % 归一化多普勒频率
+        vh = vh_range(h+1);   % vh = -0.5 + h/Nv; % 归一化多普勒频率
         p_vec = exp(1j*2*pi*vh*(0:N-1)'); % 多普勒相位向量
-        % circshift(s,[0,r]) 是将序列 s 循环按列移位 r 个位置。
-        A{r+1,h+1} = circshift(diag(p_vec), r); % 时延+多普勒矩阵
+        A{r+1,h+1} = circshift(diag(p_vec), r); % 时延+多普勒矩阵 % circshift(s,[0,r]) 是将序列 s 循环按列移位 r 个位置。
     end
 end
 
@@ -136,7 +141,7 @@ title('MIAFIS收敛曲线');
 grid on;
 
 % 绘制模糊函数
-[AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, interference_map);
+[AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, interference_map, vh_range);
 
 fprintf('算法完成。最终目标值: %.4f\n', obj_values(end));
 toc;
@@ -169,12 +174,20 @@ function s_proj = project_to_constraints(z, gamma, N)
     s_proj = sqrt(N) * (s_abs .* exp(1j * angle(z))) / norm(s_abs);
 end
 
-function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p)
+function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p, vh_range)
     % 绘制模糊函数
-    
+    fs = 100e3;
+    doppler_Hz = vh_range * fs;  % 横坐标：Hz
+    normalize_flag = 0;
+
     % 计算模糊函数
     delay_range = 0:N-1;
-    doppler_range = -0.5:1/Nv:0.5-1/Nv;
+    if normalize_flag==1
+        doppler_range = -0.5:1/Nv:0.5-1/Nv;
+    else
+        doppler_range = vh_range;
+    end
+    
     AF = zeros(length(delay_range), length(doppler_range));
     
     for i = 1:length(delay_range)
@@ -188,29 +201,37 @@ function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p)
     end
     
     % 3D绘图
-    figure;
-    [X, Y] = meshgrid(doppler_range, delay_range);
-    % surf(X, Y, 10*log10(AF), 'EdgeColor', 'none');
-    surf(X, Y, AF, 'EdgeColor', 'none');
-    xlabel('归一化多普勒频率');
-    ylabel('时延(sample)');
-    zlabel('幅度');
-    title('设计的模糊函数');
-    view(30, 45);
-    colorbar;
+    % figure;
+    % [X, Y] = meshgrid(doppler_range, delay_range);
+    % % surf(X, Y, 10*log10(AF), 'EdgeColor', 'none');
+    % surf(X, Y, AF, 'EdgeColor', 'none');
+    % xlabel('归一化多普勒频率');
+    % ylabel('时延(sample)');
+    % zlabel('幅度');
+    % title('设计的模糊函数');
+    % view(30, 45);
+    % colorbar;
     
     % 2D切片
     figure;
     subplot(2,2,1);
-    imagesc(doppler_range, delay_range, 10*log10(AF));
-    xlabel('归一化多普勒频率');
+    if normalize_flag==1
+        imagesc(doppler_range, delay_range, 10*log10(AF));
+        xlabel('归一化多普勒频率');
+    else
+        imagesc(doppler_Hz, delay_range, 10*log10(AF));
+        xlabel('多普勒频率(Hz)');
+    end
+    
+    
     ylabel('时延(sample)');
     title('模糊函数');
-    clim([-30 20]);
+    % clim([-40 20]);
     colorbar;
     hold on;
     % 检测p中的连通区域
     CC = bwconncomp(p);
+    bin_width = doppler_Hz(2) - doppler_Hz(1);
     for i = 1:CC.NumObjects
         % 得到所有该区域的索引
         inds = CC.PixelIdxList{i};
@@ -219,10 +240,18 @@ function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p)
         v_min = min(v_idx)-1; v_max = max(v_idx)-1; % -1转为实际doppler bin
         
         % 映射到坐标轴（中心居中, 所以-0.5/+0.5）
-        x_left = doppler_range(v_min+1) - 0.5/Nv;
-        y_bottom = delay_range(r_min+1) - 0.5;
-        w = (v_max - v_min + 1) / Nv;
-        h = (r_max - r_min + 1);
+        if normalize_flag == 1
+            x_left = doppler_range(v_min+1) - 0.5/Nv;
+            y_bottom = delay_range(r_min+1) - 0.5;
+            w = (v_max - v_min + 1) / Nv;
+            h = (r_max - r_min + 1);
+        else
+            x_left = doppler_Hz(v_min+1) - bin_width/2;
+            x_right = doppler_Hz(v_max+1) + bin_width/2;
+            w = x_right - x_left;
+            y_bottom = delay_range(r_min+1) - 0.5;
+            h = (r_max - r_min + 1);
+        end
         
         rectangle('Position', [x_left, y_bottom, w, h], ...
             'EdgeColor', 'r', 'LineWidth', 0.5, 'LineStyle', '-');
@@ -237,16 +266,26 @@ function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p)
     grid on;
     
     subplot(2,2,3);
-    plot(doppler_range, 10*log10(AF(3, :)), 'LineWidth', 2);
-    xlabel('归一化多普勒频率');
+    if normalize_flag==1
+        plot(doppler_range, 10*log10(AF(3, :)), 'LineWidth', 2);
+        xlabel('归一化多普勒频率');
+    else
+        plot(doppler_Hz, 10*log10(AF(3, :)), 'LineWidth', 2);
+        xlabel('多普勒频率(Hz)');
+    end
     ylabel('幅度(dB)');
     title('时延=2切面');
     grid on;
     
     subplot(2,2,4);
-    plot(doppler_range, 10*log10(AF(4, :)), 'LineWidth', 2);
-    xlabel('归一化多普勒频率');
+    if normalize_flag==1
+        plot(doppler_range, 10*log10(AF(50, :)), 'LineWidth', 2);
+        xlabel('归一化多普勒频率');
+    else
+        plot(doppler_Hz, 10*log10(AF(50, :)), 'LineWidth', 2);
+        xlabel('多普勒频率(Hz)');
+    end
     ylabel('幅度(dB)');
-    title('时延=3切面');
+    title('时延=50切面');
     grid on;
 end

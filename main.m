@@ -1,9 +1,11 @@
-clc;clear;close all;
+clc;clear;
+% close all;
 rng default;
 
 sonar_signal_simulation('CW', 20, 0, 10);
 sonar_signal_simulation('LFM', 20, 0, 10);
-
+sonar_signal_simulation('Shaping', 20, 0, 10);
+sonar_signal_simulation('Random', 20, 0, 10);
 
 function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
     % 声呐信号仿真与处理（支持波形切换）
@@ -25,26 +27,39 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
     % 声呐信号仿真与处理
     % 仿真参数设置
     fs = 100e3;             % 采样频率 (Hz)
-    pulse_duration = 0.1;   % 发射脉冲持续时间 (s)
+    pulse_duration = 0.1;   % 发s射脉冲持续时间 (s)
     analysis_duration = 0.5; % 总分析时长 (s)
+    signal_len = pulse_duration * fs;
     t_pulse = 0:1/fs:pulse_duration-1/fs; % 发射信号时间向量
     t_analysis = 0:1/fs:analysis_duration-1/fs; % 分析周期时间向量
     
     c = 1500;               % 声速 (m/s)
     
     % 发射信号 (默认为线性调频信号)
-    switch upper(waveform_type)
+    switch (waveform_type)
         case 'CW'
             % 连续波信号
             disp('使用CW(连续波)信号');
-            fc = 20e3;              % 中心频率 (Hz)
+            fc = 15e3;              % 中心频率 (Hz)
             tx_signal = exp(1i*2*pi*fc*t_pulse);    
         case 'LFM'
             % 线性调频信号
             disp('使用LFM(线性调频)信号');
-            fc = 20e3;              % 中心频率 (Hz)
+            fc = 15e3;              % 中心频率 (Hz)
             Bw = 1e3;        % 带宽 (Hz)
-            tx_signal = exp(1i*pi*(Bw/pulse_duration)*t_pulse.^2) .* exp(1i*2*pi*fc*t_pulse);
+            tx_signal = exp(1i*pi*(Bw/pulse_duration)*t_pulse.^2) .* exp(1i*2*pi*fc*t_pulse); % 1xN complex double
+        case 'Shaping'
+            disp('使用AF Shaping信号');
+            fc = 15e3; % 统一的中心频率
+            data = load("100_100_1e4.mat", "s");
+            s_generate = data.s;
+            s = resample(s_generate, signal_len, length(s_generate));
+            tx_signal = (s .* exp(1i*2*pi*fc*t_pulse.'))';  % t_pulse是(0:N-1)/fs
+        case 'Random'
+            disp('使用Random信号');
+            fc = 15e3; % 统一的中心频率
+            s = exp(1j * 2*pi * rand(signal_len,1));
+            tx_signal = (s .* exp(1i*2*pi*fc*t_pulse.'))';
         % -------------------------------- TODO --------------------------------
         % case 'AF_Shaping'
         % 以CW、LFM为基础进行波形优化后进行比对
@@ -83,7 +98,7 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
     [doppler_time_result, doppler_axis, time_axis] = matched_filter_processing(tx_signal, received_signal, fs, c);
     
     % 绘制结果
-    plot_results(doppler_time_result, doppler_axis, time_axis, target_velocity, target_range);
+    plot_results(doppler_time_result, doppler_axis, time_axis, target_velocity, target_range, fc);
 
 end
 %% 目标回波生成函数
@@ -207,7 +222,7 @@ end
 %% 波形可视化函数
 function plot_waveforms(t_pulse, t_analysis, tx_signal, target_echo, reverberation, received_signal, fs, fc, waveform_type)
     % 时域绘图
-    figure('Name', ['Waveform Analysis - ', waveform_type], 'Position', [100, 100, 1200, 800]);
+    figure('Name', ['Waveform Analysis - ', waveform_type]);
     
     % 发射信号时域
     subplot(4,1,1);
@@ -280,7 +295,7 @@ function [doppler_time_result, doppler_axis, time_axis] = matched_filter_process
 end
 
 %% 结果绘制函数
-function plot_results(doppler_time_result, doppler_axis, time_axis, target_velocity, target_range)
+function plot_results(doppler_time_result, doppler_axis, time_axis, target_velocity, target_range, fc)
     figure;
     
     % 绘制多普勒-时间(距离)图
@@ -297,8 +312,8 @@ function plot_results(doppler_time_result, doppler_axis, time_axis, target_veloc
     
     % 标记目标位置
     hold on;
-    target_doppler = 2*target_velocity*20e3/1500; % 计算理论多普勒频移
-    plot(target_range, target_doppler, 'wx', 'MarkerSize', 10, 'LineWidth', 2);
+    target_doppler = 2*target_velocity*fc/1500; % 计算理论多普勒频移
+    plot(target_range, target_doppler, 'wo', 'MarkerSize', 10, 'LineWidth', 2);
     legend('Target Location');
     
 
