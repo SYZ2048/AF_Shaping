@@ -4,11 +4,19 @@
 % 参数设置
 clc;clear;close all;
 rng default;
+tic;
 fs = 100e3;             % 采样频率 (Hz)
-N = 25;
-Nv = 50;         % 多普勒bin数量
+pulse_duration = 0.1;   % 发射脉冲持续时间 (s)
+N = fs * pulse_duration;          % 波形长度
+%！！！！！！ 目前的极限是250 * 200 ！！！！！！
+N = 25 * 10;
+Nv = 1e2;         % 多普勒bin数量
+fs / Nv
+
+% N = 25;
+% Nv = 50;         % 多普勒bin数量
 gamma = 4;       % PAR参数
-max_iter = 1e3; % 最大迭代次数
+max_iter = 1e4; % 最大迭代次数
 tol = 1e-6;      % 收敛容差
 %
 
@@ -20,14 +28,14 @@ obj_values = zeros(max_iter, 1);
 
 % 设置干扰区域(p_k) (bin从0开始, MATLAB索引从1开始)
 interference_map = zeros(N, Nv);
-interference_map(3:4, 36:38) = 1; % 
-interference_map(4:4, 19:20) = 1;
-interference_map(2:N, 26) = 1;
+interference_map(N/2:N/2+2, (Nv/2+13):(Nv/2+13)) = 1;
+interference_map(20:N, Nv/2+1) = 1;    % 0 Hz
 %
 plot_ambiguity_function(s, N, Nv, interference_map);
 
 % 预计算A_k矩阵，N*Nv*N*N, 25x50x{25x25 double}
 A = cell(N, Nv);
+fprintf('A 占用内存 %.2f MB\n', whos('A').bytes / (1024^2));
 for r = 0:N-1
     for h = 0:Nv-1
         vh = -0.5 + h/Nv; % 归一化多普勒频率
@@ -47,6 +55,7 @@ for r = 0:N-1
     end
 end
 
+hh = waitbar(0, '进度'); 
 % MIAFIS主循环
 for iter = 1:max_iter
     S = s * s';
@@ -102,8 +111,18 @@ for iter = 1:max_iter
         break;
     end
 
+    % if mod(iter, 100) == 0
+    %     elapsed_time = toc; % 计算从tic以来的耗时
+    %     fprintf('第%d次迭代，已耗时 %.2f 秒。\n', iter, elapsed_time);
+    %     tic; % 重新启动计时器（计下一轮的100次）
+    % end
+
     s = s_new;
+
+    waitbar(iter/max_iter, hh, sprintf('进度: %d%%', round(iter/max_iter*100)));
 end
+close(hh); % 关闭进度条
+
 
 % 截断记录
 obj_values = obj_values(1:iter);
@@ -120,7 +139,7 @@ grid on;
 [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, interference_map);
 
 fprintf('算法完成。最终目标值: %.4f\n', obj_values(end));
-
+toc;
 
 function s_proj = project_to_constraints(z, gamma, N)
     % 投影操作，满足PAR和能量约束
