@@ -2,88 +2,84 @@ clc;clear;
 close all;
 rng default;
 
-SNR = 10;
-TSR = -14;
-RSR = 0;
+% -------------------------------- 仿真参数设置 --------------------------------
+SNR = 10;        %   SNR - 信噪比(dB)
+TSR = -14;       %   TSR - 目标-混响比(dB)
 
-tic
-sonar_signal_simulation('Test', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('Shaping_Q', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('Shaping', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('Shaping_ISL', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('SFM', SNR, TSR, RSR);
-%%
-% sonar_signal_simulation('CW', SNR, TSR, RSR);
-%%
-% sonar_signal_simulation('LFM', SNR, TSR, RSR);
-%%
-% sonar_signal_simulation('GC', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('GSFM', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('Random', SNR, TSR, RSR);
-%%
-sonar_signal_simulation('BPSK', SNR, TSR, RSR);
-%%
-toc
+fs = 100e3;
+fc = 15e3;
+c = 1500;
+pulse_duration = 0.1;
+analysis_duration = 0.5;
 
-function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
+N_r = 1000; % 混响散射点数量
+[ranges, delays, dopplers] = generate_scatters(pulse_duration, analysis_duration, N_r, fc, c);
+
+%%
+sonar_signal_simulation('Test', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('Shaping_Q', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('Shaping', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('Shaping_ISL', SNR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('SFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+% sonar_signal_simulation('CW', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+% sonar_signal_simulation('LFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+% sonar_signal_simulation('GC', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('GSFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('Random', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+sonar_signal_simulation('BPSK', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+%%
+
+function sonar_signal_simulation(waveform_type, SNR, TSR, ...
+                                    fc, fs, c, pulse_duration, analysis_duration, ...
+                                    N_r, ranges, delays, dopplers)
     % 声呐信号仿真与处理（支持波形切换）
     % 输入参数：
-    %   waveform_type - 波形类型：'CW'（连续波）或 'LFM'（线性调频）
-    %   SNR - 信噪比(dB)
-    %   TSR - 目标-混响比(dB)
-    %   RSR - 混响-噪声比(dB)
-    if nargin < 4
-        RSR = 15; if nargin < 3
-            TSR = 10; if nargin < 2
-                SNR = 20; if nargin < 1
-                    waveform_type = 'LFM';
-                end
-            end
-        end
-    end
-
-    % 声呐信号仿真与处理
-    % 仿真参数设置
-    fs = 100e3;             % 采样频率 (Hz)
-    pulse_duration = 0.1;   % 发s射脉冲持续时间 (s)
-    prf = 1 / pulse_duration;       % 脉冲重复频率（Hz）
-    analysis_duration = 0.5; % 总分析时长 (s)
-    signal_len = pulse_duration * fs;
+    %   waveform_type - 波形类型
     t_pulse = 0:1/fs:pulse_duration-1/fs; % 发射信号时间向量
     t_analysis = 0:1/fs:analysis_duration-1/fs; % 分析周期时间向量
+    prf = 1 / pulse_duration;       % 脉冲重复频率（Hz）
+    Bw = 1e3;
+    signal_len = pulse_duration * fs;
     N_len = 100;
     p = signal_len / N_len;
-    c = 1500;               % 声速 (m/s)
-    fc = 15e3; % 统一的中心频率
-    Bw = 1e3;        % 带宽 (Hz)
 
+    % 目标参数
+    target_range = 50;
+    target_velocity = 3;
+    target_delay = 2*target_range/c;                 % 双程延迟 (s)
+    target_doppler = 2*target_velocity*fc/c;         % 多普勒频移 (Hz)
+    fprintf('Target Delay (s): %.1f\n', target_delay);
+    fprintf('Target Doppler (Hz): %.2f\n', target_doppler);
+
+    disp(['使用 ', 'waveform_type', '信号']);
     % 发射信号 (默认为线性调频信号)
     switch (waveform_type)
         case 'CW'
             % 连续波信号
-            disp('使用CW(连续波)信号');
             tx_signal = exp(1i*2*pi*fc*t_pulse);    
         case 'LFM'
             % 线性调频信号
-            disp('使用LFM(线性调频)信号');
             f0 = fc - Bw/2;
             tx_signal = exp(1i*pi*(Bw/pulse_duration)*t_pulse.^2) .* exp(1i*2*pi*f0*t_pulse); % 1xN complex double
         case 'BPSK'
             % BPSK信号
-            disp('使用BPSK信号');
             code_length = 13;       % 码元长度(可根据需要调整)
             chip_duration = pulse_duration/code_length;  % 每个码元的持续时间
             binary_seq = '1111100110101';   % randi([0 1], 1, code_length);
             phase_seq = binary_seq * pi;    % 将二进制序列转换为相位(0->0°, 1->180°)
             % 创建时间向量
             t_chip = 0:1/fs:chip_duration-1/fs;
-            tx_signal = [];
+            tx_signal = zeros(1,signal_len);
             % 生成BPSK信号
             for i = 1:code_length
                 chip_signal = exp(1i*(2*pi*fc*t_chip + phase_seq(i)));
@@ -94,7 +90,6 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
                 tx_signal = [tx_signal zeros(1, length(t_pulse)-length(tx_signal))];
             end
         case 'SFM'
-            disp('使用SFM信号');
             fm = 100;
             beta = Bw / fm / 2 - 1; % B = 2fm*(1+beta)
             sfm_finst = @(t) fc+beta*fm*cos(2*pi*fm*t);
@@ -109,7 +104,6 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
         % case 'AF_Shaping'
         % 以CW、LFM为基础进行波形优化后进行比对
         case 'Shaping'
-            disp('使用AF Shaping信号');
             data = load("100_100_5e3_local_ISLQ_60Hz.mat",'s', 'interference_map');
             s_generate = data.s;
             inference = data.interference_map;
@@ -117,7 +111,6 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
             s = resample(s_generate, signal_len, length(s_generate));
             tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
         case 'Shaping_Q'
-            disp('使用Shaping_Q信号');
             data = load("100_100_5e3_local_Q_60Hz.mat", "s");
             s_generate = data.s;    % 100*1
             s = resample(s_generate, p, 1); % 10000*1
@@ -135,14 +128,11 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
             % figure;plot(real(tx_signal_downsample));
             % plot_AF(tx_signal_downsample, fs/p, prf);
         case 'Shaping_ISL'
-            disp('使用Shaping_ISL信号');
             data = load("100_100_5e3_local_ISL_60Hz.mat", "s");
             s_generate = data.s;
             s = resample(s_generate, signal_len, length(s_generate));
             tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
-
         case 'GC'
-            disp('使用GC信号');
             GC_N_components = 20;            % 谐波数量（频点数量）
             GC_f0 = fc - Bw/2;
             GC_s = 250;             % s 为起始的频率间隔(Hz)
@@ -185,7 +175,6 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
             end
             tx_signal = gc_samples/max(abs(gc_samples));
         case 'GSFM'
-            disp('使用GSFM信号');
             rho = 1.9;               % Variable exponent parameter
             alpha = 1e3;             % Frequency modulation term
             gsfm_finst = @(t)(fc + (Bw/2)*sin(2*pi*alpha*t.^rho));
@@ -195,7 +184,6 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
             tx_signal = gsfm_samples.';
         % ------------------------------------------------------------------------
         case 'Random'
-            disp('使用Random信号');
             s_generate = exp(1j * 2*pi * rand(100,1));
             s = resample(s_generate, p, 1);
             tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
@@ -204,7 +192,6 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
                 disp('File Test.mat does not exist. Exiting function.');
                 return; % 如果文件不存在，直接返回
             end
-            disp('使用Test信号');
             data = load("Test.mat", "s");
             s_generate = data.s;
             s = resample(s_generate, signal_len, length(s_generate));
@@ -226,25 +213,15 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
     % plot(f, X);xlim([fc-Bw fc+Bw]);
     % title([waveform_type, ' Spectrum']);
 
-
-    % 目标参数
-    target_range = 50;      % 目标距离 (m)
-    target_velocity = 3;     % 目标速度 (m/s), 正值为远离
-
     % 生成目标回波
-    target_delay = 2*target_range/c;                 % 双程延迟 (s)
-    target_doppler = 2*target_velocity*fc/c;         % 多普勒频移 (Hz)
-    fprintf('Target Delay (s): %.1f\n', target_delay);
-    fprintf('Target Doppler (Hz): %.2f\n', target_doppler);
     target_echo = generate_target_echo(tx_signal, t_pulse, t_analysis, target_delay, target_doppler, fs);
 
     % 生成混响
-    N_r = 1000;             % 散射体数量
-    reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, N_r, fc, c, fs);
+    reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, N_r, ranges, delays, dopplers, fs);
 
     % 调整信号强度
     [target_echo, reverberation, noise] = adjust_signal_levels(...
-        target_echo, reverberation, SNR, TSR, RSR);
+        target_echo, reverberation, SNR, TSR);
 
     % 合成接收信号
     received_signal = target_echo + reverberation + noise;
@@ -259,6 +236,47 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, RSR)
     plot_results(doppler_time_result, doppler_axis, time_axis, target_velocity, target_range, fc, waveform_type);
 
 end
+
+
+%%
+function [ranges, delays, dopplers] = generate_scatters(pulse_duration, analysis_duration, N_r, fc, c)
+    max_range = c * (analysis_duration - pulse_duration)/2;
+    ranges = (0.03 + (1 - 0.03) * rand(1, N_r)) * max_range;   % 随机距离
+    delays = 2 * ranges / c;             % 双程延迟
+    
+    % 双指数分布的多普勒频移
+    s = 20;   % s \in [6, 20], s 越大，频移越轻微
+    mu = log(10^(s/20));
+    reverberation_knots = sign(rand(1, N_r)-0.5) .* exprnd(1/mu, 1, N_r);
+    dopplers = 2 * reverberation_knots * 0.514444 * fc / c;
+    % ---------------- 测试代码 ----------------
+    % Doppler 分布可视化
+    % figure;
+    % histogram(dopplers, 100, 'Normalization', 'pdf'); % 使用归一化的直方图（表示概率密度）
+    % title('Doppler Shift Distribution (Double-sided Exponential)');
+    % xlabel('Doppler Shift (Hz)');
+    % ylabel('Probability Density');
+    % legend('Simulated Doppler Shifts');
+    % grid on;
+    % 可视化：混响点 Doppler-Range 散点图
+    % figure;
+    % scatter(ranges, dopplers, 20, 'filled');  % 每个点代表一个散射体
+    % xlabel('Range (m)');
+    % ylabel('Doppler Shift (Hz)');
+    % title('Reverberation Scatterers: Range vs. Doppler');
+    % grid on;
+    % % 画出 attenuation vs. range
+    % attenuations = 1 ./ log(ranges + exp(1));
+    % figure;
+    % plot(ranges, attenuations, '.');
+    % xlabel('Range (m)');
+    % ylabel('Attenuation Factor');
+    % title('Attenuation vs. Range');
+    % grid on;
+
+    % ---------------- 测试代码 ----------------end
+end
+
 %% 目标回波生成函数
 function target_echo = generate_target_echo(tx_signal, t_pulse, t_analysis, delay, doppler, fs)
     % 初始化全零信号
@@ -286,49 +304,10 @@ function target_echo = generate_target_echo(tx_signal, t_pulse, t_analysis, dela
 end
 
 %% 混响生成函数
-function reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, N_r, fc, c, fs)
+function reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, N_r, ranges, delays, dopplers, fs)
     % 初始化混响信号
     reverberation = zeros(size(t_analysis));
     reverberation_no_decay = zeros(size(t_analysis));
-    
-    % 生成散射体参数
-    max_range = c * (t_analysis(end) - t_pulse(end))/2;
-    ranges = (0.03 + (1 - 0.03) * rand(1, N_r)) * max_range;   % 随机距离
-    delays = 2 * ranges / c;             % 双程延迟
-    
-    % 双指数分布的多普勒频移
-    s = 20;   % s \in [6, 20], s 越大，频移越轻微
-    mu = log(10^(s/20));
-    reverberation_knots = sign(rand(1, N_r)-0.5) .* exprnd(1/mu, 1, N_r);
-    dopplers = 2 * reverberation_knots * 0.514444 * fc / c;
-    
-    % ---------------- 测试代码 ----------------
-    % Doppler 分布可视化
-    % figure;
-    % histogram(dopplers, 100, 'Normalization', 'pdf'); % 使用归一化的直方图（表示概率密度）
-    % title('Doppler Shift Distribution (Double-sided Exponential)');
-    % xlabel('Doppler Shift (Hz)');
-    % ylabel('Probability Density');
-    % legend('Simulated Doppler Shifts');
-    % grid on;
-    % 可视化：混响点 Doppler-Range 散点图
-    % figure;
-    % scatter(ranges, dopplers, 20, 'filled');  % 每个点代表一个散射体
-    % xlabel('Range (m)');
-    % ylabel('Doppler Shift (Hz)');
-    % title('Reverberation Scatterers: Range vs. Doppler');
-    % grid on;
-    % % 画出 attenuation vs. range
-    % attenuations = 1 ./ log(ranges + exp(1));
-    % figure;
-    % plot(ranges, attenuations, '.');
-    % xlabel('Range (m)');
-    % ylabel('Attenuation Factor');
-    % title('Attenuation vs. Range');
-    % grid on;
-
-    % ---------------- 测试代码 ----------------end
-     
 
     % 对每个散射体生成回波并叠加
     for i = 1:N_r
@@ -351,16 +330,10 @@ function reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, 
     % ---------------- 测试代码 ----------------end
 end
 
-%% 噪声生成函数
-function noise = generate_noise(signal, SNR)
-    signal_power = mean(abs(signal).^2);
-    noise_power = signal_power / (10^(SNR/10));
-    noise = sqrt(noise_power/2) * (randn(size(signal)) + 1i*randn(size(signal)));
-end
 
 %% 信号强度调整
 function [target_echo, reverberation, noise] = adjust_signal_levels(...
-    target_echo, reverberation, SNR, TSR, ~)
+    target_echo, reverberation, SNR, TSR)
     
     % 计算基础功率
     P_target = mean(abs(target_echo).^2);
