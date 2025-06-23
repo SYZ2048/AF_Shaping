@@ -2,9 +2,13 @@ clc;clear;
 close all;
 rng default;
 
-% -------------------------------- 仿真参数设置 --------------------------------
+%% -------------------------------- 仿真参数设置 --------------------------------
+load_environment = 1;
+if load_environment == 1
+    load("10_m17_reverberation.mat")
+else
 SNR = 10;        %   SNR - 信噪比(dB)
-TSR = -14;       %   TSR - 目标-混响比(dB)
+TSR = -17;       %   TSR - 目标-混响比(dB)
 
 fs = 100e3;
 fc = 15e3;
@@ -14,7 +18,7 @@ analysis_duration = 0.5;
 
 N_r = 1000; % 混响散射点数量
 [ranges, delays, dopplers] = generate_scatters(pulse_duration, analysis_duration, N_r, fc, c);
-
+end
 %%
 sonar_signal_simulation('Test', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
@@ -22,15 +26,15 @@ sonar_signal_simulation('Shaping_Q', SNR, TSR, fc, fs, c, pulse_duration, analys
 %%
 sonar_signal_simulation('Shaping', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
-sonar_signal_simulation('Shaping_ISL', SNR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+% sonar_signal_simulation('Shaping_ISL', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
 sonar_signal_simulation('SFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
-% sonar_signal_simulation('CW', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+sonar_signal_simulation('CW', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
-% sonar_signal_simulation('LFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+sonar_signal_simulation('LFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
-% sonar_signal_simulation('GC', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+sonar_signal_simulation('GC', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
 sonar_signal_simulation('GSFM', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 %%
@@ -45,6 +49,9 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
     % 声呐信号仿真与处理（支持波形切换）
     % 输入参数：
     %   waveform_type - 波形类型
+    disp(['---------------- 使用 ', waveform_type, ' 信号 ----------------']);
+
+
     t_pulse = 0:1/fs:pulse_duration-1/fs; % 发射信号时间向量
     t_analysis = 0:1/fs:analysis_duration-1/fs; % 分析周期时间向量
     prf = 1 / pulse_duration;       % 脉冲重复频率（Hz）
@@ -58,36 +65,48 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
     target_velocity = 3;
     target_delay = 2*target_range/c;                 % 双程延迟 (s)
     target_doppler = 2*target_velocity*fc/c;         % 多普勒频移 (Hz)
-    fprintf('Target Delay (s): %.1f\n', target_delay);
+    fprintf('Target Delay (s): %.3f\n', target_delay);
     fprintf('Target Doppler (Hz): %.2f\n', target_doppler);
 
-    disp(['使用 ', 'waveform_type', '信号']);
+
     % 发射信号 (默认为线性调频信号)
     switch (waveform_type)
+        case 'Test'
+            filename = '100_100_5e4_local_Qisl_60Hz.mat';
+            filename = 'matlab.mat';
+            if ~exist(filename, 'file')
+                disp('File Test.mat does not exist. Exiting function.');
+                return; % 如果文件不存在，直接返回
+            end
+            data = load(filename, "s");
+            s_generate = data.s;
+            s = resample(s_generate, signal_len, length(s_generate));
+            tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
         case 'CW'
             % 连续波信号
-            tx_signal = exp(1i*2*pi*fc*t_pulse);    
+            tx_signal = exp(1i*2*pi*fc*t_pulse);
         case 'LFM'
             % 线性调频信号
             f0 = fc - Bw/2;
             tx_signal = exp(1i*pi*(Bw/pulse_duration)*t_pulse.^2) .* exp(1i*2*pi*f0*t_pulse); % 1xN complex double
         case 'BPSK'
-            % BPSK信号
-            code_length = 13;       % 码元长度(可根据需要调整)
-            chip_duration = pulse_duration/code_length;  % 每个码元的持续时间
-            binary_seq = '1111100110101';   % randi([0 1], 1, code_length);
-            phase_seq = binary_seq * pi;    % 将二进制序列转换为相位(0->0°, 1->180°)
-            % 创建时间向量
-            t_chip = 0:1/fs:chip_duration-1/fs;
-            tx_signal = zeros(1,signal_len);
-            % 生成BPSK信号
+            % BPSK信号参数
+            code_length = 13;                  % 码元长度
+            binary_seq = [1 1 1 1 1 0 0 1 1 0 1 0 1];  % 预设二进制序列
+            phase_seq = binary_seq * pi;       % 映射相位: 0→0°, 1→180°
+            % 计算每个码元的持续时间（基于总脉冲时长）
+            chip_duration = pulse_duration / code_length;
+            chip_samples = round(chip_duration * fs);  % 每个码元的采样点数
+            tx_signal = [];
             for i = 1:code_length
-                chip_signal = exp(1i*(2*pi*fc*t_chip + phase_seq(i)));
-                tx_signal = [tx_signal chip_signal];
+                t_chip = (0:chip_samples-1) / fs;  % 当前码元的时间向量
+                chip_signal = cos(2*pi*fc*t_chip + phase_seq(i));  % BPSK调制
+                tx_signal = [tx_signal, chip_signal];
             end
+            % 确保信号长度与t_pulse一致
             tx_signal = tx_signal(1:min(length(tx_signal), length(t_pulse)));
             if length(tx_signal) < length(t_pulse)
-                tx_signal = [tx_signal zeros(1, length(t_pulse)-length(tx_signal))];
+                tx_signal = [tx_signal, zeros(1, length(t_pulse)-length(tx_signal))];
             end
         case 'SFM'
             fm = 100;
@@ -187,15 +206,7 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
             s_generate = exp(1j * 2*pi * rand(100,1));
             s = resample(s_generate, p, 1);
             tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
-        case 'Test'
-            if ~exist('matlab.mat', 'file')
-                disp('File Test.mat does not exist. Exiting function.');
-                return; % 如果文件不存在，直接返回
-            end
-            data = load("Test.mat", "s");
-            s_generate = data.s;
-            s = resample(s_generate, signal_len, length(s_generate));
-            tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
+
         otherwise
             error('不支持的波形类型，请输入CW或LFM');
     end
@@ -251,28 +262,28 @@ function [ranges, delays, dopplers] = generate_scatters(pulse_duration, analysis
     dopplers = 2 * reverberation_knots * 0.514444 * fc / c;
     % ---------------- 测试代码 ----------------
     % Doppler 分布可视化
-    % figure;
-    % histogram(dopplers, 100, 'Normalization', 'pdf'); % 使用归一化的直方图（表示概率密度）
-    % title('Doppler Shift Distribution (Double-sided Exponential)');
-    % xlabel('Doppler Shift (Hz)');
-    % ylabel('Probability Density');
-    % legend('Simulated Doppler Shifts');
-    % grid on;
+    figure;
+    histogram(dopplers, 100, 'Normalization', 'pdf'); % 使用归一化的直方图（表示概率密度）
+    title('Doppler Shift Distribution (Double-sided Exponential)');
+    xlabel('Doppler Shift (Hz)');
+    ylabel('Probability Density');
+    legend('Simulated Doppler Shifts');
+    grid on;
     % 可视化：混响点 Doppler-Range 散点图
-    % figure;
-    % scatter(ranges, dopplers, 20, 'filled');  % 每个点代表一个散射体
-    % xlabel('Range (m)');
-    % ylabel('Doppler Shift (Hz)');
-    % title('Reverberation Scatterers: Range vs. Doppler');
-    % grid on;
-    % % 画出 attenuation vs. range
-    % attenuations = 1 ./ log(ranges + exp(1));
-    % figure;
-    % plot(ranges, attenuations, '.');
-    % xlabel('Range (m)');
-    % ylabel('Attenuation Factor');
-    % title('Attenuation vs. Range');
-    % grid on;
+    figure;
+    scatter(ranges, dopplers, 20, 'filled');  % 每个点代表一个散射体
+    xlabel('Range (m)');
+    ylabel('Doppler Shift (Hz)');
+    title('Reverberation Scatterers: Range vs. Doppler');
+    grid on;
+    % 画出 attenuation vs. range
+    attenuations = 1 ./ log(ranges + exp(1));
+    figure;
+    plot(ranges, attenuations, '.');
+    xlabel('Range (m)');
+    ylabel('Attenuation Factor');
+    title('Attenuation vs. Range');
+    grid on;
 
     % ---------------- 测试代码 ----------------end
 end
@@ -441,8 +452,9 @@ function plot_results(doppler_time_result, doppler_axis, time_axis, target_veloc
     colormap('jet');
     c = clim;          % 获取当前 color axis 的范围
     new_min = 90;      % 想要设定的下限
-    clim([c(2)-8 c(2)]);
+    clim([c(2)-10 c(2)]);
     xlim([0 150])
+    ylim([0 150])
     
     % % 标记目标位置
     % hold on;
@@ -459,32 +471,38 @@ function plot_results(doppler_time_result, doppler_axis, time_axis, target_veloc
     [rows, cols] = find(data >= threshold);
     % 标记所有检测到的峰值位置
     hold on;
-    if ~isempty(rows)
-        for i = 1:length(rows)
-            plot(time_axis(cols(i)), doppler_axis(rows(i)), 'ro', ...
-                'MarkerSize', 12, 'LineWidth', 1.5);
-        end
-    end
+    % if ~isempty(rows)
+    %     for i = 1:length(rows)
+    %         plot(time_axis(cols(i)), doppler_axis(rows(i)), 'ro', ...
+    %             'MarkerSize', 12, 'LineWidth', 1.5);
+    %     end
+    % end
     % 标记理论目标位置
     target_doppler = 2*target_velocity*fc/1500; % 计算理论多普勒频移
     h_target = plot(target_range, target_doppler, 'wo', ...
-        'MarkerSize', 10, 'LineWidth', 2);
-    % 创建图例
-    if ~isempty(rows)
-        legend([h_target, plot(nan, nan, 'ro', 'MarkerFaceColor', 'w')], ...
-            {'Theoretical Target', 'Detected Peaks'}, ...
-            'Location', 'best');
-    else
-        legend(h_target, 'Theoretical Target', 'Location', 'best');
-    end
+        'MarkerSize', 15, 'LineWidth', 2);
+
+    % % 创建图例
+    % if ~isempty(rows)
+    %     legend([h_target, plot(nan, nan, 'ro', 'MarkerFaceColor', 'w')], ...
+    %         {'Theoretical Target', 'Detected Peaks'}, ...
+    %         'Location', 'best');
+    % else
+    %     legend(h_target, 'Theoretical Target', 'Location', 'best');
+    % end
     hold off;
+
+    [~, range_idx] = min(abs(time_axis - target_range)); % 距离维度索引
+    [~, doppler_idx] = min(abs(doppler_axis - target_doppler)); % 多普勒维度索引
+    % 获取目标理论位置的响应强度
+    target_response = data(doppler_idx, range_idx);
+    fprintf('Target Response (dB): %.2f\n', target_response);
+    fprintf('Target Response to Peak (dB): %.2f\n', max(data(:)) - target_response);
 
 end
 
 function plot_AF(sig, fs, prf)
     % [afmag_NAF, delay_NAF, doppler] = ambgfun(tx_signal, fs, prf);
-    c = 1500;
-    fc = 15e3;
     [afmag, delay, doppler] = ambgfun(sig, fs, prf);
     
     % 3D AF
