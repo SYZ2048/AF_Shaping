@@ -1,41 +1,46 @@
 % function miafis_demo()
 % MIAFIS算法演示 - 复现论文6.3.4节结果
 
-% 参数设置
 clc;clear;
 close all;
 rng default;
 tic;
-fs = 1e3;             % 采样频率 (Hz)
-%！！！！！！ 目前的极限是250 * 200 ！！！！！！
-N = 100;
+
+% 参数设置 from main.m
+fs_main = 100e3;
+pulse_duration = 0.05;
+Bw = 1e3;
+c0 = 1500;
+signal_len = pulse_duration * fs_main;
+up_sample_rate = fs_main / Bw;
+N_len = signal_len  / up_sample_rate;   %！！！！！！ 目前的极限是250 * 200 ！！！！！！
+distance = 2;
+delta_delay = distance /c0;
+delta_t = pulse_duration / N_len;
+delay_bin_idx = delta_delay / delta_t;
+% 波形优化参数
+fs = fs_main / up_sample_rate;             % 采样频率 (Hz)，需要对应main.m中的fs，fs = fs_main * N / signal_len_main
 Nv = 100;         % 多普勒bin数量
 
 f_max = 200;           % 优化范围的最高频率
 doppler_bins = linspace(-f_max, f_max, Nv+1);
 vh_range = doppler_bins / fs; 
-target_freq = 60;  % 目标频率Hz
+target_freq = 0;  % 目标频率Hz
 [~, freq_bin_idx] = min(abs(doppler_bins - target_freq));  % 找最近的bin
 
-gamma = 4;       % PAR参数
-max_iter = 5e4; % 最大迭代次数
+gamma = 1.5;       % PAR参数
+max_iter = 1e3; % 最大迭代次数
 tol = 1e-4;      % 收敛容差
 
 % 设置干扰区域(p_k) (bin从0开始, MATLAB索引从1开始)
-interference_map = zeros(N, Nv);
-% interference_map(1:N, Nv/2:Nv/2+2) = 0.5;
-% interference_map(1:N, freq_bin_idx+1) = 0.5;
-
-interference_map(1:N, freq_bin_idx:freq_bin_idx) = 1;   % Q
-interference_map(min(5,N):N, Nv/2+1) = 0.5;    % 0 Hz
-
-
+interference_map = zeros(N_len, Nv);
+% interference_map(1:N, freq_bin_idx:freq_bin_idx) = 1;   % Q
+interference_map(2:4, Nv/2+1) = 1;    % 0 Hz
 
 Algorithm = 'local';  % 'original', 'squarem', 'local'
 %%
-
 % 初始化随机波形和目标函数值
-s = exp(1j * 2*pi * rand(N,1));
+s = exp(1j * 2*pi * rand(N_len,1));
 obj_values = zeros(max_iter, 1);
 
 % data = load("100_100_5e3_local_ISLQ_60Hz.mat", "s", "interference_map");
@@ -44,26 +49,26 @@ obj_values = zeros(max_iter, 1);
 % plot_ambiguity_function(s_generate, N, Nv, interference_map, vh_range, fs);
 % figure;plot(real(s_generate));
 
-plot_ambiguity_function(s, N, Nv, interference_map, vh_range, fs);
+plot_ambiguity_function(s, N_len, Nv, interference_map, vh_range, fs);
 
 %% 
 % 预计算A_k矩阵，N*Nv*N*N, 25x50x{25x25 double}
-A = cell(N, Nv);
+A = cell(N_len, Nv);
 fprintf('A 占用内存 %.2f MB\n', whos('A').bytes / (1024^2));
-for r = 0:N-1
+for r = 0:N_len-1
     for h = 0:Nv-1
         vh = vh_range(h+1);   % vh = -0.5 + h/Nv; % 归一化多普勒频率
-        p_vec = exp(1j*2*pi*vh*(0:N-1)'); % 多普勒相位向量
+        p_vec = exp(1j*2*pi*vh*(0:N_len-1)'); % 多普勒相位向量
         A{r+1,h+1} = circshift(diag(p_vec), r); % 时延+多普勒矩阵 % circshift(s,[0,r]) 是将序列 s 循环按列移位 r 个位置。
     end
 end
 
 % 计算lambda_u(B)
 lambda_u_B = 0;
-for r = 0:N-1
+for r = 0:N_len-1
     for h = 0:Nv-1
         if interference_map(r+1,h+1) > 0
-            lambda_u_B = lambda_u_B + interference_map(r+1,h+1) * (N - r);
+            lambda_u_B = lambda_u_B + interference_map(r+1,h+1) * (N_len - r);
         end
     end
 end
@@ -73,23 +78,23 @@ hh = waitbar(0, '进度');
 for iter = 1:max_iter
     switch Algorithm
         case 'original'
-            s_new = miafis_update(s, A, interference_map, lambda_u_B, N, Nv, gamma);
+            s_new = miafis_update(s, A, interference_map, lambda_u_B, N_len, Nv, gamma);
             
         case 'squarem'
             if iter == 1
                 s_prev = s;
-                s_prev_obj = compute_objective(s_prev, A, interference_map, N, Nv);
+                s_prev_obj = compute_objective(s_prev, A, interference_map, N_len, Nv);
             end
-            s_new = squarem_acceleration(s, A, interference_map, lambda_u_B, N, Nv, gamma, @miafis_update, @compute_objective, s_prev, s_prev_obj);
+            s_new = squarem_acceleration(s, A, interference_map, lambda_u_B, N_len, Nv, gamma, @miafis_update, @compute_objective, s_prev, s_prev_obj);
             s_prev = s;
-            s_prev_obj = compute_objective(s, A, interference_map, N, Nv);
+            s_prev_obj = compute_objective(s, A, interference_map, N_len, Nv);
             
         case 'local'
-            s_new = local_majorization_acceleration(s, A, interference_map, lambda_u_B, N, Nv, gamma, @compute_objective);
+            s_new = local_majorization_acceleration(s, A, interference_map, lambda_u_B, N_len, Nv, gamma, @compute_objective);
     end
 
     % 计算目标函数值
-    obj_values(iter) = compute_objective(s, A, interference_map, N, Nv);
+    obj_values(iter) = compute_objective(s, A, interference_map, N_len, Nv);
 
     % 检查收敛
     if norm(s_new - s) / norm(s) < tol
@@ -116,13 +121,28 @@ ylabel('目标函数值');
 title('MIAFIS收敛曲线');
 grid on;
 
-%% 绘制模糊函数
-% data = load("test100hz.mat", "s");
-% s_generate = data.s;
 
-[AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, interference_map, vh_range, fs);
+%% 绘制模糊函数
+filename = '1k_0p9.mat';
+% data = load(filename, "s");
+% s = data.s;
+% ----------------------- Test code start    ----------------------- 
+% rho = 1.9;               % Variable exponent parameter
+% alpha = 1e3;             % Frequency modulation term
+% prf = 1 / pulse_duration;
+% fc = 0;
+% gsfm_finst = @(t)(fc + (Bw/2)*sin(2*pi*alpha*t.^rho));
+% gsfmwav = phased.CustomFMWaveform('SampleRate',fs,...
+%     'PulseWidth',pulse_duration,'FrequencyModulation',gsfm_finst,'PRF',prf);
+% gsfm_samples = gsfmwav();
+% s = gsfm_samples;
+% ----------------------- Test code end      ----------------------- 
+
+[AF, delay_range, doppler_range] = plot_ambiguity_function(s, N_len, Nv, interference_map, vh_range, fs);
 
 toc;
+
+save(filename);   % 只保存变量 varName
 
 function s_new = miafis_update(s, A, interference_map, lambda_u_B, N, Nv, gamma)
     % MIAFIS核心更新步骤
