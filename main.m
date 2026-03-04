@@ -8,28 +8,30 @@ if load_environment == 1
     load("10_m17_reverberation.mat")
 else
 SNR = 10;        %   SNR - 信噪比(dB)
-TSR = -13;       %   TSR - 目标-混响比(dB)
+TSR = -17;       %   TSR - 目标-混响比(dB)
 
 fs = 100e3;
 fc = 15e3;
 c0 = 1500;
-pulse_duration = 0.05;       % 脉冲宽度
+Tp = 0.1;       % 脉冲宽度
 analysis_duration = 0.5;    % 发射间隔
 
-N_r = 1; % 混响散射点数量
-[ranges, delays, dopplers] = generate_scatters(pulse_duration, analysis_duration, N_r, fc, c0);
+N_r = 1e3; % 混响散射点数量
+[ranges, delays, dopplers] = generate_scatters(Tp, analysis_duration, N_r, fc, c0);
 close all;
 end
-
+% sonar_signal_simulation('Random', SNR, TSR, fc, fs, c0, Tp, analysis_duration, N_r, ranges, delays, dopplers);
+sonar_signal_simulation('Shaping_Q', SNR, TSR, fc, fs, c0, Tp, analysis_duration, N_r, ranges, delays, dopplers);
 % ------------------- Test --------------------------------------------
-sonar_signal_simulation('LFM', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
-sonar_signal_simulation('Shaping', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
-sonar_signal_simulation('GSFM', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
-sonar_signal_simulation('Random', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+% sonar_signal_simulation('LFM', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+% sonar_signal_simulation('GSFM', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+% sonar_signal_simulation('Costas', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+
+% sonar_signal_simulation('Shaping', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 % %%
 % sonar_signal_simulation('Test', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 % %%
-% sonar_signal_simulation('Shaping_Q', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
+% sonar_signal_simulation('Shaping_Q', SNR, TSR, fc, fs, c0, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 % %%
 % sonar_signal_simulation('Shaping', SNR, TSR, fc, fs, c, pulse_duration, analysis_duration, N_r, ranges, delays, dopplers);
 % %%
@@ -70,25 +72,44 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
     fprintf('N_len: %d\n', N_len);
 
     % 目标参数
-    target_range = 100;
-    target_velocity = 0;
+    target_range = 50;
+    target_velocity = 3;
     target_delay = 2*target_range/c;                 % 双程延迟 (s)
     target_doppler = 2*target_velocity*fc/c;         % 多普勒频移 (Hz)
     fprintf('Target Delay (ms): %.2f\n', target_delay*1e3);
     fprintf('Target Doppler (Hz): %.2f\n', target_doppler);
 
     % ----------------------- Test code start    ----------------------- 
-    distance = 2;
-    interference_range = target_range - distance;
-    interference_velocity = 0;
-    interference_delay = 2*interference_range/c;                 % 双程延迟 (s)
-    interference_doppler = 2*interference_velocity*fc/c;         % 多普勒频移 (Hz)
-    fprintf('Interference Delay (ms): %.2f\n', interference_delay*1e3);
-    fprintf('Interference Doppler (Hz): %.2f\n', interference_doppler);
+    % distance = 10;
+    % interference_range = target_range - distance;
+    % interference_velocity = 0;
+    % interference_delay = 2*interference_range/c;                 % 双程延迟 (s)
+    % interference_doppler = 2*interference_velocity*fc/c;         % 多普勒频移 (Hz)
+    % fprintf('Interference Delay (ms): %.2f\n', interference_delay*1e3);
+    % fprintf('Interference Doppler (Hz): %.2f\n', interference_doppler);
     % ----------------------- Test code end      ----------------------- 
 
     % 发射信号 (默认为线性调频信号)
     switch (waveform_type)
+        case 'Costas'
+            costas_seq = [1, 2, 4, 8, 5, 10, 9, 7, 3, 6];  % 长度10的Costas序列
+            M = length(costas_seq);
+            Tc = pulse_duration / M;                              % 码片时长
+            % 均匀频率格点覆盖带宽
+            freq_grid = linspace(fc - Bw/2, fc + Bw/2, M);
+            chip_freqs = freq_grid(costas_seq);
+            
+            % 合成分段恒频 Costas 信号（列向量）
+            costas_samples = zeros(1, signal_len);
+            for n = 1:M
+                idx1 = floor((n-1)*Tc*fs) + 1;
+                idx2 = min(signal_len, floor(n*Tc*fs));
+                if idx1 <= idx2
+                    tn = t_pulse(idx1:idx2);
+                    costas_samples(1, idx1:idx2) = exp(1j*2*pi*chip_freqs(n)*tn);
+                end
+            end
+            tx_signal = costas_samples;
         case 'Test'
             filename = '100_100_5e4_local_Qisl_60Hz.mat';
             filename = 'matlab.mat';
@@ -141,14 +162,16 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
         % case 'AF_Shaping'
         % 以CW、LFM为基础进行波形优化后进行比对
         case 'Shaping'
-            data = load("1k_0p9.mat",'s', 'interference_map');
-            s_generate = data.s;
-            inference = data.interference_map;
+            % data = load("WISL_8to20.mat",'xWeCAN');
+            % data = load("WISL_70to130.mat",'xWeCAN');
+            % s_generate = data.xWeCAN;
+            % inference = data.interference_map;
             % plot_AF(s_generate, fs/p, prf);
+
             s = resample(s_generate, up_sample_rate, 1);
             tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
         case 'Shaping_Q'
-            data = load("100_100_5e3_local_Q_60Hz.mat", "s");
+            data = load("100_100_5e3_local_ISLQ_60Hz.mat", "s");
             s_generate = data.s;    % 100*1
             s = resample(s_generate, up_sample_rate, 1); % 10000*1
             tx_signal = s' .* exp(1i*2*pi*fc*t_pulse);  % t_pulse是(0:N-1)/fs 1*10000
@@ -228,7 +251,7 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
         otherwise
             error('不支持的波形类型，请输入CW或LFM');
     end
-    % plot_AF(tx_signal, fs, prf);
+    plot_AF(tx_signal, fs, prf, waveform_type);
     % PAR
     instantaneous_power = abs(tx_signal).^2;   % 瞬时功率
     peak_power = max(instantaneous_power);      % 峰值功率
@@ -242,32 +265,33 @@ function sonar_signal_simulation(waveform_type, SNR, TSR, ...
     % X = abs(X_shifted) / max(abs(X_shifted));
     % plot(f, X);xlim([fc-Bw fc+Bw]);
     % title([waveform_type, ' Spectrum']);
+    % spectrogram(tx_signal, 256, 128, 1024, fs, 'yaxis')
 
     % 生成目标回波
     target_echo = generate_target_echo(tx_signal, t_pulse, t_analysis, target_delay, target_doppler, fs);
 
     % 生成混响
-    % reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, N_r, ranges, delays, dopplers, fs);
+    reverberation = generate_reverberation(tx_signal, t_pulse, t_analysis, N_r, ranges, delays, dopplers, fs);
 
     % 调整信号强度
-    % [target_echo, reverberation, noise] = adjust_signal_levels(target_echo, reverberation, SNR, TSR);
+    [target_echo, reverberation, noise] = adjust_signal_levels(target_echo, reverberation, SNR, TSR);
 
     % 合成接收信号
-    % received_signal = target_echo + reverberation + noise;
+    received_signal = target_echo + reverberation + noise;
 
     % ----------------------- Test code start    ----------------------- 
-    interference_echo = generate_target_echo(tx_signal, t_pulse, t_analysis, interference_delay, interference_doppler, fs);
-    [target_echo, interference_echo, ~] = adjust_signal_levels(target_echo, interference_echo, SNR, TSR);
-
-    received_signal = target_echo + interference_echo;
-    % received_signal = target_echo;
-    plot_waveforms(t_pulse, t_analysis, tx_signal, target_echo, interference_echo, received_signal, fs, fc, waveform_type);
+    % interference_echo = generate_target_echo(tx_signal, t_pulse, t_analysis, interference_delay, interference_doppler, fs);
+    % [target_echo, interference_echo, noise] = adjust_signal_levels(target_echo, interference_echo, SNR, TSR);
+    % 
+    % received_signal = target_echo + interference_echo + noise;
+    % % received_signal = target_echo;
+    % plot_waveforms(t_pulse, t_analysis, tx_signal, target_echo, interference_echo, received_signal, fs, fc, waveform_type);
     % ----------------------- Test code end      ----------------------- 
 
 
 
     % 可视化时域波形
-    % plot_waveforms(t_pulse, t_analysis, tx_signal, target_echo, reverberation, received_signal, fs, fc, waveform_type);
+    plot_waveforms(t_pulse, t_analysis, tx_signal, target_echo, reverberation, received_signal, fs, fc, waveform_type);
 
     % 匹配滤波处理
     [doppler_time_result, doppler_axis, time_axis] = matched_filter_processing(tx_signal, received_signal, fs, c);
@@ -484,44 +508,24 @@ function plot_results(doppler_time_result, doppler_axis, time_axis, target_veloc
     c = clim;          % 获取当前 color axis 的范围
     new_min = 90;      % 想要设定的下限
     clim([c(2)-10 c(2)]);
-    xlim([80 120])
-    ylim([-10 10])
     
-    % % 标记目标位置
-    % hold on;
-    % target_doppler = 2*target_velocity*fc/1500; % 计算理论多普勒频移
-    % plot(target_range, target_doppler, 'wo', 'MarkerSize', 10, 'LineWidth', 2);
-    % legend('Target Location');
+    % 标记目标位置
+    hold on;
+    target_doppler = 2*target_velocity*fc/1500; % 计算理论多普勒频移
+    plot(target_range, target_doppler, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+    legend('Target Location');
     
 
     % 寻找所有局部最大值位置
     data = 20*log10(abs(doppler_time_result));
     % 设置峰值检测阈值（高于最大值的-6dB）
-    threshold = max(data(:)) - 0.1;
     % 寻找所有超过阈值的峰值
-    [rows, cols] = find(data >= threshold);
     % 标记所有检测到的峰值位置
-    hold on;
-    % if ~isempty(rows)
-    %     for i = 1:length(rows)
-    %         plot(time_axis(cols(i)), doppler_axis(rows(i)), 'ro', ...
-    %             'MarkerSize', 12, 'LineWidth', 1.5);
-    %     end
-    % end
-    % 标记理论目标位置
-    target_doppler = 2*target_velocity*fc/1500; % 计算理论多普勒频移
-    h_target = plot(target_range, target_doppler, 'wo', ...
-        'MarkerSize', 15, 'LineWidth', 2);
-
-    % % 创建图例
-    % if ~isempty(rows)
-    %     legend([h_target, plot(nan, nan, 'ro', 'MarkerFaceColor', 'w')], ...
-    %         {'Theoretical Target', 'Detected Peaks'}, ...
-    %         'Location', 'best');
-    % else
-    %     legend(h_target, 'Theoretical Target', 'Location', 'best');
-    % end
-    hold off;
+    % hold on;
+    % target_doppler = 2*target_velocity*fc/1500; % 计算理论多普勒频移
+    % h_target = plot(target_range, target_doppler, 'wo', ...
+    %     'MarkerSize', 15, 'LineWidth', 2);
+    % hold off;
 
     [~, range_idx] = min(abs(time_axis - target_range)); % 距离维度索引
     [~, doppler_idx] = min(abs(doppler_axis - target_doppler)); % 多普勒维度索引
@@ -530,43 +534,44 @@ function plot_results(doppler_time_result, doppler_axis, time_axis, target_veloc
     fprintf('Target Response (dB): %.2f\n', target_response);
     fprintf('Target Response to Peak (dB): %.2f\n', max(data(:)) - target_response);
 
-    % ----------------------- Test code start    ----------------------- 
-    figure; % 创建新图形窗口
-    % 找到0多普勒对应的索引
-    [~, zero_doppler_idx] = min(abs(doppler_axis - 0));
-    % 提取0多普勒处的距离响应
-    zero_doppler_response = data(zero_doppler_idx, :);
-    % 绘制0多普勒处的距离响应
-    plot(time_axis, zero_doppler_response, 'b-', 'LineWidth', 2);
-    xlabel('Range (m)');
-    ylabel('Response (dB)');
-    title(['Zero-Doppler Range Response - ', waveform_type], 'Interpreter', 'none');
-    ylim([50 80])
-    xlim([90 110])
-    grid on;
-    % 标记目标距离位置
-    hold on;
-    % plot(target_range, zero_doppler_response(find(time_axis >= target_range, 1)), ...
-    %     'ro', 'MarkerSize', 10, 'LineWidth', 2, 'MarkerFaceColor', 'r');
-    xline(target_range, 'r--', 'LineWidth', 2, 'DisplayName', 'Target Range');
-    legend('Zero-Doppler Response', 'Target Range');
-    % 标记最大响应强度-3db
-    max_response = max(zero_doppler_response);
-    minus_3db_level = max_response - 3;
-    yline(minus_3db_level, 'r--', 'LineWidth', 1.5, 'DisplayName', '-3 dB Level');
-    hold off;
-    % 输出0多普勒处的响应信息
-    fprintf('\n=== Zero-Doppler Response Analysis ===\n');
-    fprintf('Zero-Doppler Response at Target Range (%.2f m): %.2f dB\n', ...
-        target_range, zero_doppler_response(find(time_axis >= target_range, 1)));
-    fprintf('Maximum in Zero-Doppler Response: %.2f dB at %.2f m\n', ...
-        max(zero_doppler_response), time_axis(zero_doppler_response == max(zero_doppler_response)));
-    fprintf('3dB Beamwidth in Range: %.2f m\n', ...
-        calculate_3dB_beamwidth(time_axis, zero_doppler_response));
-    % ----------------------- Test code end      -----------------------
+    % % ----------------------- Test code start    ----------------------- 
+    % figure; % 创建新图形窗口
+    % % 找到0多普勒对应的索引
+    % [~, zero_doppler_idx] = min(abs(doppler_axis - 0));
+    % % 提取0多普勒处的距离响应
+    % zero_doppler_response = data(zero_doppler_idx, :);
+    % % 绘制0多普勒处的距离响应
+    % plot(time_axis, zero_doppler_response, 'b-', 'LineWidth', 0.5);
+    % xlabel('Range (m)');
+    % ylabel('Response (dB)');
+    % title(['Zero-Doppler Range Response - ', waveform_type], 'Interpreter', 'none');
+    % ylim([30 85])
+    % xlim([85 110])
+    % grid on;
+    % 
+    % % 峰值-3dB 线
+    % hold on;
+    % max_response = max(zero_doppler_response);
+    % % minus_3db_level = max_response - 3;
+    % % yline(minus_3db_level, 'r--', 'LineWidth', 1.5, 'DisplayName', '-3 dB Level');    
+    % hold off;
+    % 
+    % % 输出0多普勒处的响应信息
+    % fprintf('=== Zero-Doppler Response Analysis ===\n');
+    % fprintf('Zero-Doppler Response at Target Range (%.2f m): %.2f dB\n', ...
+    %     target_range, zero_doppler_response(find(time_axis >= target_range, 1)));
+    % fprintf('Maximum in Zero-Doppler Response: %.2f dB at %.2f m\n', ...
+    %     max(zero_doppler_response), time_axis(zero_doppler_response == max(zero_doppler_response)));
+    % fprintf('3dB Beamwidth in Range: %.2f m\n', ...
+    %     calculate_3dB_beamwidth(time_axis, zero_doppler_response));
+    % 
+    % % ==================== 零多普勒一维 OS-CFAR 检测 - 干扰太强，不适用
+    % 
+    % 
+    % % ----------------------- Test code end      -----------------------
 end
 
-function plot_AF(sig, fs, prf)
+function plot_AF(sig, fs, prf, waveform_type)
     % [afmag_NAF, delay_NAF, doppler] = ambgfun(tx_signal, fs, prf);
     [afmag, delay, doppler] = ambgfun(sig, fs, prf);
     
@@ -578,24 +583,37 @@ function plot_AF(sig, fs, prf)
     % set(gcf,'color','w');
     
     % 2D AF
-    figure();
-    imagesc(delay*1e3,doppler,mag2db(afmag))
-    xlabel('Delay \tau (ms)')
-    ylabel('Doppler f_d (Hz)')
-    colorbar;
-    colormap('jet');
-    clim([-50 0])
-    ylim([-500 500])
+    % figure();
+    % imagesc(delay*1e3,doppler,mag2db(afmag))
+    % xlabel('Delay \tau (ms)')
+    % ylabel('Doppler f_d (Hz)')
+    % colorbar;
+    % colormap('jet');
+    % clim([-50 0])
+    % ylim([-500 500])
     
 
     % Q function
+    % figure();
+    % Q_func = sum(abs(afmag).^2, 2);   % 对每个多普勒下所有的时延积分，得到 Q 函数
+    % Q_func = Q_func / max(Q_func);    % 归一化
+    % Q_dB = 10 * log10(Q_func);        % 转为 dB
+    % plot(doppler, Q_dB);
+    % title('Q function dB');
+    % xlim([-500 500])
+    
+    % 匹配滤波结果图（0多普勒切面）
     figure();
-    Q_func = sum(abs(afmag).^2, 2);   % 对每个多普勒下所有的时延积分，得到 Q 函数
-    Q_func = Q_func / max(Q_func);    % 归一化
-    Q_dB = 10 * log10(Q_func);        % 转为 dB
-    plot(doppler, Q_dB);
-    title('Q function dB');
-    xlim([-500 500])
+    [afmag, delay] = ambgfun(sig, fs, prf,'Cut','Doppler');
+    afmag_db = mag2db(afmag);
+    plot(delay*1500, afmag_db, 'LineWidth', 1);
+    % xlabel('Delay \tau (ms)');
+    xlabel('Range (m)')
+    ylabel('Response (dB)');
+    title(['Matched Filter Zero-Doppler Cut - ', waveform_type], 'Interpreter', 'none');
+    ylim([-60 0])
+    % xlim([-30 30])
+    grid on;
 end
 
 % ----------------------- Test code start    ----------------------- 

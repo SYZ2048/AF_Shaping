@@ -8,45 +8,59 @@ tic;
 
 % 参数设置 from main.m
 fs_main = 100e3;
-pulse_duration = 0.05;
+pulse_duration = 0.1;
+prf = 1/pulse_duration;
 Bw = 1e3;
 c0 = 1500;
 signal_len = pulse_duration * fs_main;
 up_sample_rate = fs_main / Bw;
 N_len = signal_len  / up_sample_rate;   %！！！！！！ 目前的极限是250 * 200 ！！！！！！
-distance = 2;
+distance = 20;
 delta_delay = distance /c0;
 delta_t = pulse_duration / N_len;
-delay_bin_idx = delta_delay / delta_t;
+
 % 波形优化参数
 fs = fs_main / up_sample_rate;             % 采样频率 (Hz)，需要对应main.m中的fs，fs = fs_main * N / signal_len_main
 Nv = 100;         % 多普勒bin数量
-
 f_max = 200;           % 优化范围的最高频率
 doppler_bins = linspace(-f_max, f_max, Nv+1);
 vh_range = doppler_bins / fs; 
-target_freq = 0;  % 目标频率Hz
+target_freq = 60;  % 目标频率Hz
 [~, freq_bin_idx] = min(abs(doppler_bins - target_freq));  % 找最近的bin
-
 gamma = 1.5;       % PAR参数
-max_iter = 1e3; % 最大迭代次数
-tol = 1e-4;      % 收敛容差
+max_iter = 5e3; % 最大迭代次数
+tol = 3e-4;      % 收敛容差
+
+delay_bin_idx = round(delta_delay / delta_t);
+range_span = 6; % m
+range_span_idx = round(range_span/c0 / delta_t );
 
 % 设置干扰区域(p_k) (bin从0开始, MATLAB索引从1开始)
-interference_map = zeros(N_len, Nv);
-% interference_map(1:N, freq_bin_idx:freq_bin_idx) = 1;   % Q
-interference_map(2:4, Nv/2+1) = 1;    % 0 Hz
+interference_map = zeros(N_len, Nv+1);
+interference_map(1:N_len, freq_bin_idx:freq_bin_idx) = 1;   % Q
+interference_map(20:N_len, Nv/2+1) = 1;
+% interference_map(delay_bin_idx-range_span_idx:delay_bin_idx+range_span_idx+1, freq_bin_idx-5:freq_bin_idx+5) = 1;   % Q
+% interference_map(delay_bin_idx-range_span_idx:delay_bin_idx+range_span_idx+1, Nv/2+1) = 1;    % 0 Hz
+
 
 Algorithm = 'local';  % 'original', 'squarem', 'local'
+
+
+s = exp(1j * 2*pi * rand(N_len,1)); % 初始化随机波形和目标函数值
+s_random = s;
 %%
-% 初始化随机波形和目标函数值
-s = exp(1j * 2*pi * rand(N_len,1));
+
+
+% f0 = 0 - Bw/2;
+% t_pulse = 0:1/fs:pulse_duration-1/fs; 
+% s = exp(1i*pi*(Bw/pulse_duration)*t_pulse.^2) .* exp(1i*2*pi*f0*t_pulse);
+% s = s.';
 obj_values = zeros(max_iter, 1);
 
 % data = load("100_100_5e3_local_ISLQ_60Hz.mat", "s", "interference_map");
 % s_generate = data.s;
-% interference_map = data.interference_map;
-% plot_ambiguity_function(s_generate, N, Nv, interference_map, vh_range, fs);
+% % interference_map = data.interference_map;
+% plot_ambiguity_function(s_generate, N_len, Nv, interference_map, vh_range, fs);
 % figure;plot(real(s_generate));
 
 plot_ambiguity_function(s, N_len, Nv, interference_map, vh_range, fs);
@@ -121,9 +135,52 @@ ylabel('目标函数值');
 title('MIAFIS收敛曲线');
 grid on;
 
+[AF, delay_range, doppler_range] = plot_ambiguity_function(s, N_len, Nv, interference_map, vh_range, fs);
+
+[af,delay,doppler] = ambgfun(s, fs, prf);
+[af_random,delay_random,doppler_random] = ambgfun(s_random, fs, prf);
+figure();
+subplot(2,1,1);
+imagesc(delay*1e3,doppler,mag2db(af));
+ylim([-100 100]);
+xlim([-30 30]);
+clim([-50 0])
+cbar = colorbar;
+cbar.Label.String = '(dB)';
+axis xy
+xlabel('Delay \tau (ms)')
+ylabel('Doppler f_d (Hz)')
+title('Optimized AF');
+subplot(2,1,2);
+imagesc(delay_random*1e3,doppler_random,mag2db(af_random));
+ylim([-100 100]);
+xlim([-30 30]);
+clim([-50 0])
+cbar = colorbar;
+cbar.Label.String = '(dB)';
+axis xy
+xlabel('Delay \tau (ms)')
+ylabel('Doppler f_d (Hz)')
+title('Random AF');
+
+figure();
+[afmag, delay] = ambgfun(s, fs, prf,Cut='Doppler', CutValue=0);
+[afmag_random, ~] = ambgfun(s_random, fs, prf,Cut='Doppler', CutValue=0);
+afmag_db = mag2db(afmag);
+afmag_random_db = mag2db(afmag_random);
+plot(delay*1500, afmag_db, 'LineWidth', 1);hold on;
+plot(delay*1500, afmag_random_db, 'LineWidth', 1);
+% xlabel('Delay \tau (ms)');
+xlabel('Range (m)')
+ylabel('Response');
+title('匹配滤波结果（多普勒切面）');
+legend('优化波形','随机波形','Location','best');
+
+grid on;
+
 
 %% 绘制模糊函数
-filename = '1k_0p9.mat';
+filename = 'range7_13.mat';
 % data = load(filename, "s");
 % s = data.s;
 % ----------------------- Test code start    ----------------------- 
@@ -143,6 +200,65 @@ filename = '1k_0p9.mat';
 toc;
 
 save(filename);   % 只保存变量 varName
+
+%% -------------------------------- Test
+% 读取特定文件中的波形，和随机波形进行模糊函数性能比对
+clc;
+% clear;
+close all;
+rng default;
+
+filename = 'WISL1.mat';
+data = load(filename);
+s = data.xWeCAN;
+[AF, delay_range, doppler_range] = plot_ambiguity_function(s_random, N_len, Nv, interference_map, vh_range, fs);
+[AF, delay_range, doppler_range] = plot_ambiguity_function(s, N_len, Nv, interference_map, vh_range, fs);
+
+
+[af,delay,doppler] = ambgfun(s, fs, prf);
+[af_random,delay_random,doppler_random] = ambgfun(s_random, fs, prf);
+figure();
+subplot(2,1,1);
+imagesc(delay*1e3,doppler,mag2db(af));
+ylim([-100 100]);
+xlim([-30 30]);
+clim([-50 0])
+cbar = colorbar;
+cbar.Label.String = '(dB)';
+axis xy
+xlabel('Delay \tau (ms)')
+ylabel('Doppler f_d (Hz)')
+title('Optimized AF');
+subplot(2,1,2);
+imagesc(delay_random*1e3,doppler_random,mag2db(af_random));
+ylim([-100 100]);
+xlim([-30 30]);
+clim([-50 0])
+cbar = colorbar;
+cbar.Label.String = '(dB)';
+axis xy
+xlabel('Delay \tau (ms)')
+ylabel('Doppler f_d (Hz)')
+title('Random AF');
+
+
+figure();
+[afmag, delay] = ambgfun(s, fs, prf,'Cut','Doppler');
+[afmag_random, ~] = ambgfun(s_random, fs, prf,'Cut','Doppler');
+afmag_db = mag2db(afmag);
+afmag_random_db = mag2db(afmag_random);
+plot(delay*1500, afmag_db, 'LineWidth', 1);hold on;
+plot(delay*1500, afmag_random_db, 'LineWidth', 1);
+% xlabel('Delay \tau (ms)');
+xlabel('Range (m)')
+ylabel('Response');
+xlim([-40 40])
+title('匹配滤波结果（0多普勒切面）');
+legend('优化波形','随机波形','Location','best');
+grid on;
+
+% -------------------------------- Test Code End --------------------------------
+
 
 function s_new = miafis_update(s, A, interference_map, lambda_u_B, N, Nv, gamma)
     % MIAFIS核心更新步骤
@@ -321,6 +437,36 @@ function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p,
     % title('设计的模糊函数');
     % view(30, 45);
     % colorbar;
+
+    %%%%%%% [新增功能] 计算interference_map区域内的旁瓣均值 %%%%%
+    if nargin >= 4 && ~isempty(p)
+        % 确保 p 是逻辑掩码
+        mask = logical(p);
+        
+        % 检查维度一致性
+        if isequal(size(AF), size(mask))
+            % 提取掩码区域内的功率值
+            vals_in_region = AF(mask);
+            
+            if ~isempty(vals_in_region)
+                % 1. 计算线性域的平均功率
+                mean_power = mean(vals_in_region);
+                % 2. 转换为 dB
+                mean_sidelobe_dB = 10 * log10(mean_power);
+                
+                % 3. 命令行输出
+                fprintf('\n------------------------------------------------\n');
+                fprintf('【统计结果】\n');
+                fprintf('  Interference Map 区域内的旁瓣均值: %.4f dB\n', mean_sidelobe_dB);
+                fprintf('------------------------------------------------\n\n');
+            else
+                disp('提示: Interference Map 区域为空，无法计算均值。');
+            end
+        else
+            warning('Interference Map (p) 的尺寸与生成的 AF 不匹配，跳过均值计算。');
+        end
+    end
+    %%%%%%% [新增结束] %%%%%
     
     % 2D切片
     figure;
@@ -368,7 +514,7 @@ function [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N, Nv, p,
     
     figure;
     subplot(2,2,2);
-    plot(delay_range, 10*log10(AF(:, round(Nv/2))), 'LineWidth', 2);
+    plot(delay_range, 10*log10(AF(:, round(Nv/2))), 'LineWidth', 1);
     xlabel('时延(sample)');
     ylabel('幅度(dB)');
     title('零多普勒切面');
