@@ -21,7 +21,7 @@ delta_delay = distance /c0;
 delta_t = pulse_duration / N_len;
 
 % 波形库参数
-filename = 'Waveform_Lib_40to100_step2.mat';
+filename = 'Waveform_Lib.mat';
 doppler_step = 2;
 library_dopplers = 40 : doppler_step : 100; 
 num_waveforms = length(library_dopplers);
@@ -179,68 +179,57 @@ for i = 1 : num_waveforms
     % grid on;
 
 end
-save('Waveform_Lib.mat', 'Waveform_Library', 'library_dopplers', 'doppler_step');
+save(filename, 'Waveform_Library', 'library_dopplers', 'doppler_step');
 disp('离线波形库生成完毕并已保存！');
 
 toc;
 
-% %% -------------------------------- Test --------------------------------
-% % 读取特定文件中的波形，和随机波形进行模糊函数性能比对
-% clc;
-% % clear;
-% close all;
-% rng default;
-% 
-% 
-% data = load(filename);
-% s = data.xWeCAN;
-% [AF, delay_range, doppler_range] = plot_ambiguity_function(s_random, N_len, Nv, interference_map, vh_range, fs);
-% [AF, delay_range, doppler_range] = plot_ambiguity_function(s, N_len, Nv, interference_map, vh_range, fs);
-% 
-% 
-% [af,delay,doppler] = ambgfun(s, fs, prf);
-% [af_random,delay_random,doppler_random] = ambgfun(s_random, fs, prf);
-% figure();
-% subplot(2,1,1);
-% imagesc(delay*1e3,doppler,mag2db(af));
-% ylim([-100 100]);
-% xlim([-30 30]);
-% clim([-50 0])
-% cbar = colorbar;
-% cbar.Label.String = '(dB)';
-% axis xy
-% xlabel('Delay \tau (ms)')
-% ylabel('Doppler f_d (Hz)')
-% title('Optimized AF');
-% subplot(2,1,2);
-% imagesc(delay_random*1e3,doppler_random,mag2db(af_random));
-% ylim([-100 100]);
-% xlim([-30 30]);
-% clim([-50 0])
-% cbar = colorbar;
-% cbar.Label.String = '(dB)';
-% axis xy
-% xlabel('Delay \tau (ms)')
-% ylabel('Doppler f_d (Hz)')
-% title('Random AF');
-% 
-% 
-% figure();
-% [afmag, delay] = ambgfun(s, fs, prf,'Cut','Doppler');
-% [afmag_random, ~] = ambgfun(s_random, fs, prf,'Cut','Doppler');
-% afmag_db = mag2db(afmag);
-% afmag_random_db = mag2db(afmag_random);
-% plot(delay*1500, afmag_db, 'LineWidth', 1);hold on;
-% plot(delay*1500, afmag_random_db, 'LineWidth', 1);
-% % xlabel('Delay \tau (ms)');
-% xlabel('Range (m)')
-% ylabel('Response');
-% xlim([-40 40])
-% title('匹配滤波结果（0多普勒切面）');
-% legend('优化波形','随机波形','Location','best');
-% grid on;
-% 
-% % -------------------------------- Test Code End --------------------------------
+%% -------------------------------- 加载离线波形库并查看特定波形的模糊函数 --------------------------------
+disp(' ');
+disp('------------------------------------------------');
+disp('正在加载波形库并验证特定波形的模糊函数...');
+
+% 1. 指定要查看的.mat文件和目标多普勒频率
+lib_filename = 'Waveform_Lib_40to100_step2.mat'; 
+target_doppler_to_check = 100;      % 修改这里：输入你想查看的波形的目标多普勒(Hz)
+
+% 2. 加载数据
+if exist(lib_filename, 'file')
+    lib_data = load(lib_filename);
+    
+    % 3. 查找该频率在波形库中对应的索引
+    [min_diff, check_idx] = min(abs(lib_data.library_dopplers - target_doppler_to_check));
+    
+    if min_diff > 1e-3
+        warning(['波形库中没有精确匹配 ', num2str(target_doppler_to_check), ...
+                 ' Hz 的波形。将显示最接近的 ', num2str(lib_data.library_dopplers(check_idx)), ' Hz 波形。']);
+    end
+    
+    % 提取波形和实际频率
+    s_check = lib_data.Waveform_Library{check_idx};
+    actual_freq = lib_data.library_dopplers(check_idx);
+    
+    % 4. 重新构造该波形对应的 interference_map (用于在图上画出预期的红色抑制框)
+    [~, check_freq_bin_idx] = min(abs(doppler_bins - actual_freq));
+    check_interference_map = zeros(N_len, Nv+1);
+    check_interference_map(1:N_len, check_freq_bin_idx:check_freq_bin_idx) = 1;   % 目标多普勒抑制区
+    check_interference_map(20:N_len, Nv/2+1) = 0.8;                               % 零多普勒静态杂波抑制区
+    
+    % 5. 调用你已有的函数进行绘图并计算统计结果
+    disp(['=> 正在绘制目标多普勒为 ', num2str(actual_freq), ' Hz 的波形模糊函数...']);
+    
+    % 创建一个新的 figure 避免覆盖之前的图
+    figure_name = sprintf('验证波形模糊函数 - %d Hz', actual_freq);
+    set(gcf, 'Name', figure_name); 
+    
+    [AF_check, delay_range_check, doppler_range_check] = plot_ambiguity_function(s_check, N_len, Nv, check_interference_map, vh_range, fs);
+    
+else
+    disp(['未找到文件 ', lib_filename, '，请先确保波形库生成成功并保存在当前目录。']);
+end
+disp('------------------------------------------------');
+
+% -------------------------------- 加载离线波形库并查看特定波形的模糊函数 End --------------------------------
 
 
 function s_new = miafis_update(s, A, interference_map, lambda_u_B, N, Nv, gamma)
